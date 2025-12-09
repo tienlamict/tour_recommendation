@@ -1,0 +1,481 @@
+
+# PROMPT: Hệ thống gợi ý Tour Du lịch sử dụng AHP và TOPSIS
+
+## 1. MÔ TẢ TỔNG QUAN
+
+Xây dựng hệ thống gợi ý tour du lịch thông minh sử dụng kết hợp phương pháp AHP (Analytic Hierarchy Process) và TOPSIS (Technique for Order Preference by Similarity to Ideal Solution). Hệ thống giúp khách hàng tìm tour phù hợp dựa trên sở thích cá nhân về các yếu tố: phong cảnh, văn hóa, ẩm thực, mạo hiểm, thư giãn, mua sắm.
+
+## 2. KIẾN TRÚC HỆ THỐNG
+
+### 2.1. Công nghệ sử dụng
+- **Backend**: Python 3.9+
+- **Database**: MySQL 8.0 (Docker)
+- **GUI**: Tkinter với ttk (giao diện hiện đại)
+- **Libraries**: 
+  - numpy (tính toán ma trận)
+  - mysql-connector-python (kết nối database)
+  - python-dotenv (quản lý biến môi trường)
+  - logging (ghi log)
+
+### 2.2. Cấu trúc thư mục
+```
+tour_recommendation/
+├── src/
+│   ├── __init__.py
+│   ├── main.py                    # Entry point
+│   ├── config/
+│   │   ├── __init__.py
+│   │   ├── settings.py            # Config từ .env
+│   │   └── database.py            # Database connection pool
+│   ├── models/
+│   │   ├── __init__.py
+│   │   ├── tour.py                # Tour model
+│   │   └── preference.py          # User preference model
+│   ├── algorithms/
+│   │   ├── __init__.py
+│   │   ├── ahp.py                 # AHP algorithm
+│   │   ├── topsis.py              # TOPSIS algorithm
+│   │   └── validator.py           # Consistency ratio validation
+│   ├── services/
+│   │   ├── __init__.py
+│   │   ├── tour_service.py        # Business logic
+│   │   └── recommendation_service.py
+│   ├── gui/
+│   │   ├── __init__.py
+│   │   ├── main_window.py         # Main GUI
+│   │   ├── comparison_tab.py      # Tab so sánh tiêu chí
+│   │   ├── weights_tab.py         # Tab trọng số
+│   │   ├── results_tab.py         # Tab kết quả
+│   │   └── components/
+│   │       ├── __init__.py
+│   │       ├── matrix_input.py    # Component nhập ma trận
+│   │       └── loading_dialog.py  # Loading indicator
+│   └── utils/
+│       ├── __init__.py
+│       ├── logger.py              # Logging setup
+│       ├── export.py              # Export CSV/PDF
+│       └── helpers.py             # Helper functions
+├── docker/
+│   ├── mysql/
+│   │   ├── Dockerfile
+│   │   ├── init.sql
+│   │   └── my.cnf
+│   └── docker-compose.yml
+├── tests/
+│   ├── __init__.py
+│   ├── test_ahp.py
+│   ├── test_topsis.py
+│   └── test_tour_service.py
+├── data/
+│   └── saved_preferences/         # Lưu preferences của user
+├── .env.example
+├── .gitignore
+├── requirements.txt
+├── README.md
+└── run.py                         # Script chạy ứng dụng
+```
+
+## 3. CƠ SỞ DỮ LIỆU
+
+### 3.1. Schema MySQL
+
+```sql
+-- Bảng tours (tour du lịch)
+CREATE TABLE tours (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(200) NOT NULL,
+    destination VARCHAR(200) NOT NULL,
+    duration INT NOT NULL COMMENT 'Số ngày',
+    price DECIMAL(12,2) NOT NULL COMMENT 'Giá VNĐ',
+    max_participants INT NOT NULL,
+    difficulty_level ENUM('easy', 'moderate', 'hard') DEFAULT 'moderate',
+    season VARCHAR(100) COMMENT 'Mùa phù hợp',
+    description TEXT,
+    image_url VARCHAR(500),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_destination (destination),
+    INDEX idx_price (price)
+);
+
+-- Bảng criteria (tiêu chí đánh giá)
+CREATE TABLE criteria (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL UNIQUE,
+    description TEXT,
+    icon VARCHAR(50),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Bảng tour_criteria (điểm số tour theo tiêu chí)
+CREATE TABLE tour_criteria (
+    tour_id INT,
+    criterion_id INT,
+    score DECIMAL(3,2) NOT NULL COMMENT 'Điểm từ 0-10',
+    FOREIGN KEY (tour_id) REFERENCES tours(id) ON DELETE CASCADE,
+    FOREIGN KEY (criterion_id) REFERENCES criteria(id) ON DELETE CASCADE,
+    PRIMARY KEY (tour_id, criterion_id),
+    CHECK (score >= 0 AND score <= 10)
+);
+
+-- Bảng user_preferences (lưu preferences của user)
+CREATE TABLE user_preferences (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_name VARCHAR(100),
+    preference_data JSON COMMENT 'Ma trận so sánh và trọng số',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### 3.2. Dữ liệu mẫu
+
+**Tiêu chí đánh giá (6 tiêu chí):**
+1. Phong cảnh (Scenery) - Cảnh đẹp, thiên nhiên
+2. Văn hóa (Culture) - Di tích, lịch sử, văn hóa địa phương
+3. Ẩm thực (Cuisine) - Đặc sản, món ăn địa phương
+4. Mạo hiểm (Adventure) - Hoạt động mạo hiểm, thể thao
+5. Thư giãn (Relaxation) - Nghỉ dưỡng, spa, yên tĩnh
+6. Mua sắm (Shopping) - Chợ, trung tâm thương mại
+
+**Tours mẫu (15 tours):**
+1. Hạ Long - Cát Bà (3 ngày, 4.5tr)
+2. Sapa - Fansipan (4 ngày, 5.2tr)
+3. Phú Quốc nghỉ dưỡng (5 ngày, 8tr)
+4. Đà Nẵng - Hội An (4 ngày, 6tr)
+5. Nha Trang biển (4 ngày, 5.5tr)
+6. Đà Lạt lãng mạn (3 ngày, 3.8tr)
+7. Mũi Né - Phan Thiết (3 ngày, 3.5tr)
+8. Huế - Động Phong Nha (4 ngày, 5.8tr)
+9. Tây Bắc - Mù Cang Chải (5 ngày, 6.5tr)
+10. Côn Đảo (4 ngày, 9tr)
+11. Ninh Bình - Tràng An (2 ngày, 2.5tr)
+12. Cần Thơ - Miệt vườn (3 ngày, 3.2tr)
+13. Quy Nhơn biển (4 ngày, 4.8tr)
+14. Mai Châu - Pù Luông (3 ngày, 3.6tr)
+15. Vũng Tàu cuối tuần (2 ngày, 2tr)
+
+## 4. THUẬT TOÁN
+
+### 4.1. AHP (Analytic Hierarchy Process)
+
+**Bước 1: So sánh cặp tiêu chí**
+- User so sánh 6 tiêu chí theo thang Saaty (1-9)
+- Tạo ma trận so sánh 6x6
+- **QUAN TRỌNG**: Tính Consistency Ratio (CR)
+  - CR < 0.1: Ma trận nhất quán, chấp nhận
+  - CR >= 0.1: Cảnh báo user nhập lại
+
+**Bước 2: Tính trọng số tiêu chí**
+- Phương pháp Geometric Mean (đang dùng trong code cũ)
+- Chuẩn hóa để tổng = 1
+
+**Bước 3: So sánh tours theo từng tiêu chí**
+- Với mỗi tiêu chí, so sánh cặp các tours
+- Dựa trên điểm số trong database
+- Tính trọng số tour cho từng tiêu chí
+
+**Bước 4: Tính điểm AHP tổng hợp**
+- Điểm AHP = Σ(trọng số tiêu chí × trọng số tour theo tiêu chí)
+
+### 4.2. TOPSIS
+
+**Input**: 
+- Danh sách tours với điểm AHP
+- 3 tiêu chí quyết định: Điểm AHP, Giá, Thời gian (số ngày)
+- Trọng số 3 tiêu chí (tổng = 1)
+
+**Các bước:**
+1. Chuẩn hóa ma trận quyết định
+   - Benefit criteria (AHP): normalize bình thường
+   - Cost criteria (Giá, Thời gian): chuyển đổi (max - x)
+2. Nhân với trọng số
+3. Xác định ideal positive/negative solutions
+4. Tính khoảng cách Euclidean
+5. Tính điểm TOPSIS = S- / (S+ + S-)
+6. Sắp xếp giảm dần
+
+## 5. GIAO DIỆN NGƯỜI DÙNG (GUI)
+
+### 5.1. Cửa sổ chính
+- Kích thước: 1200x800
+- Theme: Modern, màu sắc dễ nhìn
+- Có menu bar: File, Help, Export
+
+### 5.2. Tab 1: So sánh tiêu chí
+**Chức năng:**
+- Ma trận 6x6 so sánh cặp tiêu chí
+- Hỗ trợ nhập phân số (1/3, 1/5, ...)
+- Tooltip giải thích từng ô
+- Nút "Kiểm tra nhất quán" → Hiển thị CR
+- Nút "Ví dụ" → Hiển thị ma trận mẫu
+- Nút "Lưu preferences" → Lưu vào database
+- Nút "Tải preferences" → Load từ database
+
+**Validation:**
+- Kiểm tra giá trị 1/9 đến 9
+- Tính CR real-time khi nhập xong
+- Cảnh báo nếu CR >= 0.1
+
+### 5.3. Tab 2: Trọng số tiêu chí TOPSIS
+**Chức năng:**
+- 3 slider cho: Điểm AHP (0-1), Giá (0-1), Thời gian (0-1)
+- Hiển thị tổng real-time (phải = 1)
+- Auto-adjust: khi kéo 1 slider, 2 slider kia tự điều chỉnh
+- Preset buttons: "Ưu tiên chất lượng", "Ưu tiên giá rẻ", "Cân bằng"
+
+### 5.4. Tab 3: Kết quả
+**Chức năng:**
+- Bảng kết quả với các cột:
+  - STT, Tên tour, Điểm địa, Số ngày, Giá, Điểm AHP, Điểm TOPSIS
+- Sắp xếp theo TOPSIS giảm dần
+- Click vào tour → Hiển thị chi tiết (popup)
+- Nút "Xuất PDF" → Export kết quả
+- Nút "Xuất CSV" → Export dạng bảng
+- Biểu đồ: Top 5 tours (bar chart)
+
+**Chi tiết tour (popup):**
+- Ảnh tour
+- Mô tả chi tiết
+- Lịch trình
+- Điểm mạnh theo 6 tiêu chí (radar chart)
+- Giải thích: "Tour này được đề xuất vì..."
+
+### 5.5. Loading Dialog
+- Hiển thị khi tính toán AHP/TOPSIS
+- Progress bar hoặc spinner
+- Có thể cancel
+
+## 6. TÍNH NĂNG BỔ SUNG
+
+### 6.1. Lưu/Tải Preferences
+- Lưu ma trận so sánh vào database
+- User có thể đặt tên cho preference
+- Load lại để dùng cho lần sau
+
+### 6.2. Export kết quả
+- **CSV**: Bảng đơn giản
+- **PDF**: Báo cáo đẹp với:
+  - Logo, tiêu đề
+  - Bảng kết quả
+  - Biểu đồ
+  - Giải thích
+
+### 6.3. Giải thích kết quả
+- Với mỗi tour được đề xuất, giải thích:
+  - "Tour này phù hợp vì bạn ưu tiên [tiêu chí X] và tour này có điểm cao về [tiêu chí X]"
+  - "Tour này có giá [rẻ/vừa phải/cao] phù hợp với ngân sách"
+
+### 6.4. Lọc nâng cao
+- Lọc theo giá (min-max)
+- Lọc theo thời gian (min-max ngày)
+- Lọc theo điểm đến
+- Lọc theo độ khó
+
+## 7. XỬ LÝ LỖI VÀ VALIDATION
+
+### 7.1. Kết nối Database
+```python
+# Sử dụng retry logic
+def connect_with_retry(max_retries=3, delay=2):
+    for attempt in range(max_retries):
+        try:
+            conn = mysql.connector.connect(...)
+            return conn
+        except mysql.connector.Error as e:
+            if attempt < max_retries - 1:
+                time.sleep(delay)
+            else:
+                raise ConnectionError("Không thể kết nối database")
+```
+
+### 7.2. Validation Input
+- Kiểm tra ma trận so sánh hợp lệ
+- Kiểm tra CR < 0.1
+- Kiểm tra tổng trọng số = 1
+- Hiển thị lỗi rõ ràng cho user
+
+### 7.3. Logging
+```python
+# Setup logging
+import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('tour_recommendation.log'),
+        logging.StreamHandler()
+    ]
+)
+```
+
+## 8. CONFIGURATION
+
+### 8.1. File .env
+```
+# Database
+DB_HOST=localhost
+DB_PORT=3306
+DB_USER=tour_user
+DB_PASSWORD=your_secure_password
+DB_NAME=tour_db
+
+# Application
+APP_NAME=Tour Recommendation System
+LOG_LEVEL=INFO
+MAX_TOURS_DISPLAY=20
+```
+
+### 8.2. File settings.py
+```python
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+class Settings:
+    # Database
+    DB_HOST = os.getenv('DB_HOST', 'localhost')
+    DB_PORT = int(os.getenv('DB_PORT', 3306))
+    DB_USER = os.getenv('DB_USER')
+    DB_PASSWORD = os.getenv('DB_PASSWORD')
+    DB_NAME = os.getenv('DB_NAME')
+    
+    # Application
+    APP_NAME = os.getenv('APP_NAME', 'Tour Recommendation')
+    LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
+    
+    # AHP
+    MAX_CR = 0.1  # Maximum Consistency Ratio
+    
+    # GUI
+    WINDOW_WIDTH = 1200
+    WINDOW_HEIGHT = 800
+```
+
+## 9. DOCKER SETUP
+
+### 9.1. docker-compose.yml
+```yaml
+version: '3.8'
+
+services:
+  mysql:
+    build: ./docker/mysql
+    container_name: tour_db
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpassword
+      MYSQL_DATABASE: tour_db
+      MYSQL_USER: tour_user
+      MYSQL_PASSWORD: tour_password
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - tour_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  mysql_data:
+
+networks:
+  tour_network:
+    driver: bridge
+```
+
+## 10. TESTING
+
+### 10.1. Unit Tests
+```python
+# test_ahp.py
+def test_consistency_ratio():
+    # Test CR calculation
+    matrix = np.array([...])
+    cr = calculate_cr(matrix)
+    assert cr < 0.1
+
+def test_weight_calculation():
+    # Test weight sum = 1
+    matrix = np.array([...])
+    weights = calculate_weights(matrix)
+    assert abs(sum(weights) - 1.0) < 1e-6
+```
+
+### 10.2. Integration Tests
+- Test kết nối database
+- Test flow hoàn chỉnh: Input → AHP → TOPSIS → Output
+
+## 11. DOCUMENTATION
+
+### 11.1. README.md
+- Giới thiệu project
+- Hướng dẫn cài đặt
+- Hướng dẫn sử dụng
+- Screenshots
+- Architecture diagram
+
+### 11.2. Code Documentation
+- Docstrings cho tất cả functions/classes
+- Type hints đầy đủ
+- Comments cho logic phức tạp
+
+## 12. YÊU CẦU KỸ THUẬT
+
+### 12.1. Code Quality
+- Follow PEP 8
+- Type hints đầy đủ
+- Docstrings cho public methods
+- Tách logic thành modules nhỏ
+- SOLID principles
+
+### 12.2. Performance
+- Cache ma trận so sánh tours
+- Connection pooling cho database
+- Async loading cho GUI (không block UI)
+
+### 12.3. Security
+- Không hardcode passwords
+- Sử dụng .env
+- Validate tất cả inputs
+- SQL injection prevention (parameterized queries)
+
+## 13. DELIVERABLES
+
+1. **Source code** đầy đủ theo cấu trúc trên
+2. **Database schema** và dữ liệu mẫu
+3. **Docker setup** để chạy database
+4. **requirements.txt** với tất cả dependencies
+5. **README.md** chi tiết
+6. **Unit tests** cơ bản
+7. **.env.example** file mẫu
+8. **Screenshots** của GUI
+
+## 14. BONUS FEATURES (Nếu có thời gian)
+
+1. **Web version**: Flask/FastAPI + React
+2. **User authentication**: Login/Register
+3. **Review system**: User có thể review tours
+4. **Recommendation history**: Lưu lịch sử gợi ý
+5. **Collaborative filtering**: Gợi ý dựa trên users tương tự
+6. **Mobile responsive**: GUI responsive
+7. **Multi-language**: Tiếng Việt/English
+8. **API endpoints**: RESTful API cho mobile app
+
+---
+
+## NOTES QUAN TRỌNG
+
+1. **Tập trung vào code quality**: Code phải clean, maintainable, well-documented
+2. **Error handling đầy đủ**: Xử lý mọi trường hợp lỗi có thể xảy ra
+3. **User experience**: GUI phải dễ dùng, có feedback rõ ràng
+4. **Validation**: Validate CR, validate inputs, validate data
+5. **Separation of concerns**: Tách biệt logic, GUI, database
+6. **Testability**: Code phải dễ test
+7. **Configuration**: Sử dụng config files, không hardcode
+8. **Logging**: Log đầy đủ để debug
+
+---
