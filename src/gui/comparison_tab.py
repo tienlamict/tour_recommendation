@@ -91,72 +91,24 @@ class ComparisonTab(ttk.Frame):
         )
         title_label.pack(pady=10)
         
-        # Instructions with visual guide
-        instructions_text = """CÁCH SỬ DỤNG MA TRẬN SO SÁNH:
-
-Bước 1: Nhìn vào ma trận bên dưới. Bạn chỉ cần điền các ô màu trắng (phần trên đường chéo).
-
-Bước 2: Với mỗi ô, tự hỏi: "Tiêu chí ở hàng có quan trọng hơn tiêu chí ở cột không?"
-
-Bước 3: Nhập giá trị theo thang Saaty:
-  • Nhập 1  = Hai tiêu chí ngang nhau quan trọng
-  • Nhập 3  = Tiêu chí hàng quan trọng hơn một chút
-  • Nhập 5  = Tiêu chí hàng quan trọng hơn
-  • Nhập 7  = Tiêu chí hàng quan trọng hơn nhiều  
-  • Nhập 9  = Tiêu chí hàng cực kỳ quan trọng hơn
-  • Nhập 1/3, 1/5, 1/7, 1/9 = Nếu tiêu chí cột quan trọng hơn
-
-VÍ DỤ: Nếu bạn nghĩ "Phong cảnh" quan trọng hơn "Mua sắm" rõ rệt → Nhập 5
-        Ô tương ứng (Mua sắm, Phong cảnh) tự động sẽ là 1/5 = 0.2
-        """
+        # Short instructions
+        instructions = (
+            "Hướng dẫn: So sánh cặp tiêu chí theo thang Saaty (1-9). "
+            "Chỉ cần điền các ô màu trắng (phần trên đường chéo). "
+            "1=Ngang nhau, 3=Hơn một chút, 5=Hơn, 7=Hơn nhiều, 9=Cực kỳ. "
+            "Dùng phân số (1/3, 1/5...) nếu tiêu chí cột quan trọng hơn."
+        )
         
-        instructions_label = tk.Text(
+        instructions_label = ttk.Label(
             main_frame,
-            height=12,
-            width=80,
+            text=instructions,
             font=('Arial', 9),
-            wrap='word',
+            justify='left',
             background='#F0F8FF',
-            relief='flat',
-            padx=10,
-            pady=10,
-            borderwidth=1,
-            highlightthickness=1,
-            highlightbackground='#4A90E2'
+            padding=8,
+            wraplength=800
         )
-        instructions_label.insert('1.0', instructions_text)
-        instructions_label.config(state='disabled')
-        instructions_label.pack(fill='x', pady=10)
-        
-        # Visual example frame
-        example_frame = ttk.LabelFrame(main_frame, text="📌 Ví dụ minh họa", padding=10)
-        example_frame.pack(fill='x', pady=5)
-        
-        example_text = (
-            "Giả sử bạn muốn so sánh các tiêu chí:\n\n"
-            "• Ô (Phong cảnh, Văn hóa): Bạn nghĩ Phong cảnh quan trọng hơn Văn hóa một chút\n"
-            "  → Nhập: 3\n"
-            "  → Ô (Văn hóa, Phong cảnh) tự động = 1/3\n\n"
-            "• Ô (Thư giãn, Mạo hiểm): Bạn rất thích thư giãn, không thích mạo hiểm\n"
-            "  → Nhập: 7 (Thư giãn quan trọng hơn nhiều)\n"
-            "  → Ô (Mạo hiểm, Thư giãn) tự động = 1/7\n\n"
-            "💡 Lưu ý: Chỉ cần điền phần trên (màu trắng), phần dưới tự động tính!"
-        )
-        
-        example_label = tk.Text(
-            example_frame,
-            height=10,
-            width=80,
-            font=('Arial', 9),
-            wrap='word',
-            background='#FFF9E6',
-            relief='flat',
-            padx=10,
-            pady=10
-        )
-        example_label.insert('1.0', example_text)
-        example_label.config(state='disabled')
-        example_label.pack(fill='x')
+        instructions_label.pack(fill='x', pady=5)
         
         # Matrix input frame - limit height
         matrix_frame = ttk.LabelFrame(main_frame, text="Ma trận so sánh", padding=10)
@@ -307,11 +259,36 @@ VÍ DỤ: Nếu bạn nghĩ "Phong cảnh" quan trọng hơn "Mua sắm" rõ r�
                     text="✗ Không nhất quán",
                     foreground='red'
                 )
-                messagebox.showwarning(
-                    "Kết quả",
-                    f"Ma trận không nhất quán!\nConsistency Ratio = {cr:.4f} >= 0.1\n\n"
-                    "Vui lòng xem xét lại các so sánh."
-                )
+                
+                # Find specific inconsistencies
+                inconsistencies = self.validator.find_inconsistencies(matrix, self.criteria_names)
+                
+                # Build detailed message
+                message = f"Ma trận không nhất quán!\n\n"
+                message += f"Consistency Ratio (CR) = {cr:.4f}\n"
+                message += f"CR nên < 0.1 để đáng tin cậy\n\n"
+                
+                if cr >= 0.1 and cr < 0.2:
+                    message += "⚠️ CR hơi cao - có một số mâu thuẫn nhỏ\n\n"
+                elif cr >= 0.2:
+                    message += "❌ CR rất cao - có nhiều mâu thuẫn lớn\n\n"
+                
+                if inconsistencies:
+                    message += "Các mâu thuẫn phát hiện:\n"
+                    message += "=" * 50 + "\n\n"
+                    
+                    # Show top 5 most significant inconsistencies
+                    sorted_incons = sorted(inconsistencies, key=lambda x: abs(np.log(x['ratio'])), reverse=True)
+                    for i, inc in enumerate(sorted_incons[:5], 1):
+                        message += f"{i}. {inc['description']}\n\n"
+                    
+                    message += "💡 Gợi ý: Xem xét lại các so sánh trên để điều chỉnh.\n"
+                    message += "   Ví dụ: Nếu A > B và B > C, thì A nên > C."
+                else:
+                    message += "💡 Gợi ý: Hãy xem xét lại các so sánh, đặc biệt là các giá trị lớn (7, 9).\n"
+                    message += "   Thử giảm các giá trị xuống (ví dụ: 9 → 7, 7 → 5) để giảm mâu thuẫn."
+                
+                messagebox.showwarning("Kết quả", message)
         
         except Exception as e:
             logger.error(f"Error checking consistency: {e}")
