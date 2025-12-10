@@ -126,8 +126,18 @@ class MatrixInputWidget(ttk.Frame):
                     # Store entry
                     self.entries[(i, j)] = entry
                     
-                    # Tooltip
-                    self.create_tooltip(entry, f"So sánh {self.labels[i]} với {self.labels[j]}")
+                    # Tooltip with detailed explanation
+                    tooltip_text = (
+                        f"Ô này: So sánh '{self.labels[i]}' với '{self.labels[j]}'\n\n"
+                        f"Nếu '{self.labels[i]}' quan trọng hơn '{self.labels[j]}':\n"
+                        f"  • Nhập 1 = Ngang nhau\n"
+                        f"  • Nhập 3 = {self.labels[i]} hơn một chút\n"
+                        f"  • Nhập 5 = {self.labels[i]} hơn rõ rệt\n"
+                        f"  • Nhập 7 = {self.labels[i]} hơn nhiều\n"
+                        f"  • Nhập 9 = {self.labels[i]} cực kỳ quan trọng\n\n"
+                        f"Nếu '{self.labels[j]}' quan trọng hơn: Nhập phân số (1/3, 1/5, 1/7, 1/9)"
+                    )
+                    self.create_tooltip(entry, tooltip_text)
                 else:
                     # Lower triangle: auto-calculated (reciprocal)
                     label = ttk.Label(
@@ -153,15 +163,30 @@ class MatrixInputWidget(ttk.Frame):
         def on_enter(event):
             tooltip = tk.Toplevel()
             tooltip.wm_overrideredirect(True)
-            tooltip.wm_geometry(f"+{event.x_root+10}+{event.y_root+10}")
             
-            label = ttk.Label(
+            # Calculate position (avoid going off screen)
+            x = event.x_root + 15
+            y = event.y_root + 15
+            screen_width = tooltip.winfo_screenwidth()
+            screen_height = tooltip.winfo_screenheight()
+            
+            # Adjust if too far right
+            if x > screen_width - 300:
+                x = event.x_root - 320
+            
+            tooltip.wm_geometry(f"+{x}+{y}")
+            
+            label = tk.Label(
                 tooltip,
                 text=text,
                 background="#FFFFCC",
                 relief='solid',
-                borderwidth=1,
-                padding=5
+                borderwidth=2,
+                padx=10,
+                pady=8,
+                font=('Arial', 9),
+                justify='left',
+                wraplength=280
             )
             label.pack()
             

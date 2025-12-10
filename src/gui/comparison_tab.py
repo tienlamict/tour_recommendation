@@ -40,8 +40,47 @@ class ComparisonTab(ttk.Frame):
     
     def create_widgets(self):
         """Create tab widgets."""
-        # Main container
-        main_frame = ttk.Frame(self, padding=10)
+        # Create scrollable frame
+        canvas = tk.Canvas(self, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(self, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        
+        def configure_scroll_region(event):
+            # Update scroll region
+            canvas.configure(scrollregion=canvas.bbox("all"))
+            # Update canvas window width
+            canvas_width = event.width
+            canvas.itemconfig(canvas_window, width=canvas_width)
+        
+        scrollable_frame.bind("<Configure>", configure_scroll_region)
+        canvas.bind('<Configure>', lambda e: canvas.itemconfig(canvas_window, width=e.width))
+        
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Pack canvas and scrollbar
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Bind mousewheel to canvas (Windows)
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        
+        # Bind mousewheel for Linux
+        def _on_button4(event):
+            canvas.yview_scroll(-1, "units")
+        def _on_button5(event):
+            canvas.yview_scroll(1, "units")
+        canvas.bind_all("<Button-4>", _on_button4)
+        canvas.bind_all("<Button-5>", _on_button5)
+        
+        # Store canvas reference for cleanup
+        self._canvas = canvas
+        
+        # Main container (inside scrollable frame)
+        main_frame = ttk.Frame(scrollable_frame, padding=10)
         main_frame.pack(fill='both', expand=True)
         
         # Title
@@ -52,40 +91,85 @@ class ComparisonTab(ttk.Frame):
         )
         title_label.pack(pady=10)
         
-        # Instructions
-        instructions = """
-Hướng dẫn: So sánh từng cặp tiêu chí theo thang Saaty (1-9):
-  • 1: Hai tiêu chí ngang nhau
-  • 3: Tiêu chí này quan trọng hơn một chút
-  • 5: Tiêu chí này quan trọng hơn
-  • 7: Tiêu chí này quan trọng hơn nhiều
-  • 9: Tiêu chí này cực kỳ quan trọng hơn
-  • 2, 4, 6, 8: Các giá trị trung gian
-  • Có thể dùng phân số: 1/3, 1/5, 1/7, 1/9
+        # Instructions with visual guide
+        instructions_text = """CÁCH SỬ DỤNG MA TRẬN SO SÁNH:
+
+Bước 1: Nhìn vào ma trận bên dưới. Bạn chỉ cần điền các ô màu trắng (phần trên đường chéo).
+
+Bước 2: Với mỗi ô, tự hỏi: "Tiêu chí ở hàng có quan trọng hơn tiêu chí ở cột không?"
+
+Bước 3: Nhập giá trị theo thang Saaty:
+  • Nhập 1  = Hai tiêu chí ngang nhau quan trọng
+  • Nhập 3  = Tiêu chí hàng quan trọng hơn một chút
+  • Nhập 5  = Tiêu chí hàng quan trọng hơn
+  • Nhập 7  = Tiêu chí hàng quan trọng hơn nhiều  
+  • Nhập 9  = Tiêu chí hàng cực kỳ quan trọng hơn
+  • Nhập 1/3, 1/5, 1/7, 1/9 = Nếu tiêu chí cột quan trọng hơn
+
+VÍ DỤ: Nếu bạn nghĩ "Phong cảnh" quan trọng hơn "Mua sắm" rõ rệt → Nhập 5
+        Ô tương ứng (Mua sắm, Phong cảnh) tự động sẽ là 1/5 = 0.2
         """
         
-        instructions_label = ttk.Label(
+        instructions_label = tk.Text(
             main_frame,
-            text=instructions,
+            height=12,
+            width=80,
             font=('Arial', 9),
-            justify='left',
+            wrap='word',
             background='#F0F8FF',
-            padding=10
+            relief='flat',
+            padx=10,
+            pady=10,
+            borderwidth=1,
+            highlightthickness=1,
+            highlightbackground='#4A90E2'
         )
+        instructions_label.insert('1.0', instructions_text)
+        instructions_label.config(state='disabled')
         instructions_label.pack(fill='x', pady=10)
         
-        # Matrix input frame
-        matrix_frame = ttk.LabelFrame(main_frame, text="Ma trận so sánh", padding=10)
-        matrix_frame.pack(fill='both', expand=True, pady=10)
+        # Visual example frame
+        example_frame = ttk.LabelFrame(main_frame, text="📌 Ví dụ minh họa", padding=10)
+        example_frame.pack(fill='x', pady=5)
         
-        # Matrix input widget
+        example_text = (
+            "Giả sử bạn muốn so sánh các tiêu chí:\n\n"
+            "• Ô (Phong cảnh, Văn hóa): Bạn nghĩ Phong cảnh quan trọng hơn Văn hóa một chút\n"
+            "  → Nhập: 3\n"
+            "  → Ô (Văn hóa, Phong cảnh) tự động = 1/3\n\n"
+            "• Ô (Thư giãn, Mạo hiểm): Bạn rất thích thư giãn, không thích mạo hiểm\n"
+            "  → Nhập: 7 (Thư giãn quan trọng hơn nhiều)\n"
+            "  → Ô (Mạo hiểm, Thư giãn) tự động = 1/7\n\n"
+            "💡 Lưu ý: Chỉ cần điền phần trên (màu trắng), phần dưới tự động tính!"
+        )
+        
+        example_label = tk.Text(
+            example_frame,
+            height=10,
+            width=80,
+            font=('Arial', 9),
+            wrap='word',
+            background='#FFF9E6',
+            relief='flat',
+            padx=10,
+            pady=10
+        )
+        example_label.insert('1.0', example_text)
+        example_label.config(state='disabled')
+        example_label.pack(fill='x')
+        
+        # Matrix input frame - limit height
+        matrix_frame = ttk.LabelFrame(main_frame, text="Ma trận so sánh", padding=10)
+        matrix_frame.pack(fill='both', expand=False, pady=10)
+        
+        # Matrix input widget - limit expansion
         self.matrix_input = MatrixInputWidget(
             matrix_frame,
             size=len(self.criteria_names),
             labels=self.criteria_names,
             on_change=self.on_matrix_change
         )
-        self.matrix_input.pack(fill='both', expand=True)
+        self.matrix_input.pack(fill='both', expand=False)
         
         # Results frame
         results_frame = ttk.LabelFrame(main_frame, text="Kết quả", padding=10)
@@ -104,12 +188,12 @@ Hướng dẫn: So sánh từng cặp tiêu chí theo thang Saaty (1-9):
         
         # Weights display
         weights_frame = ttk.Frame(results_frame)
-        weights_frame.pack(fill='both', expand=True, pady=5)
+        weights_frame.pack(fill='both', expand=False, pady=5)
         
         ttk.Label(weights_frame, text="Trọng số tiêu chí:", font=('Arial', 10, 'bold')).pack(anchor='w')
         
         self.weights_text = tk.Text(weights_frame, height=8, width=50, font=('Courier', 9))
-        self.weights_text.pack(fill='both', expand=True, pady=5)
+        self.weights_text.pack(fill='both', expand=False, pady=5)
         self.weights_text.config(state='disabled')
         
         # Buttons frame
